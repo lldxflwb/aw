@@ -140,8 +140,14 @@ func CmdNew(args []string) {
 		repoPath := filepath.Join(cwd, repo)
 		worktreePath := filepath.Join(targetDir, repo)
 
+		// Get current branch before creating worktree
+		fromBranch := "HEAD"
+		if b, err := git.GitRun(repoPath, "rev-parse", "--abbrev-ref", "HEAD"); err == nil {
+			fromBranch = b
+		}
+
 		if !jsonOut {
-			fmt.Printf("[%s] creating worktree → %s (branch: %s)\n", repo, worktreePath, branch)
+			fmt.Printf("[%s] %s → %s\n", repo, fromBranch, branch)
 		}
 
 		if err := git.WorktreeAdd(repoPath, worktreePath, branch); err != nil {
