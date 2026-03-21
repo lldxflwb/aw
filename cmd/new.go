@@ -25,7 +25,7 @@ type newResult struct {
 // CmdNew implements "aw new --dir <target> -b <branch> [--json] [--jump]".
 func CmdNew(args []string) {
 	var dir, branch string
-	var jsonOut, jump bool
+	var jsonOut, jump, update bool
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -43,6 +43,8 @@ func CmdNew(args []string) {
 			jsonOut = true
 		case "--jump", "-j":
 			jump = true
+		case "--update", "-u":
+			update = true
 		}
 	}
 
@@ -89,6 +91,32 @@ func CmdNew(args []string) {
 		exitErr(jsonOut, "LOCK_HELD", err, 1)
 	}
 	defer lock.Release()
+
+	// Update repos before branching
+	if update {
+		if !jsonOut {
+			fmt.Println("== updating repos ==")
+		}
+		for _, repo := range repos {
+			repoPath := filepath.Join(cwd, repo)
+			if !jsonOut {
+				fmt.Printf("[%s] pulling...", repo)
+			}
+			_, err := git.GitRun(repoPath, "pull", "--ff-only")
+			if err != nil {
+				if !jsonOut {
+					fmt.Printf(" skipped (not fast-forwardable)\n")
+				}
+			} else {
+				if !jsonOut {
+					fmt.Printf(" ok\n")
+				}
+			}
+		}
+		if !jsonOut {
+			fmt.Println()
+		}
+	}
 
 	// Create worktrees
 	var failed []string
