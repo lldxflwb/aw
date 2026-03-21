@@ -38,26 +38,23 @@ This will:
 4. Symlink repo-level untracked AI context files
 5. Write state to `.aw/workspace.json`
 
-Use `--jump` to `cd` into the workspace after creation:
-
-```bash
-cd "$(aw new --dir /tmp/my-feature -b feature/login --jump)"
-```
-
-Or add a shell function to `~/.zshrc` / `~/.bashrc`:
+Use `--jump` to `cd` into the workspace after creation. Add this shell function to `~/.zshrc` or `~/.bashrc`:
 
 ```bash
 aw() {
   if [[ "$1" == "new" ]] && [[ " $* " == *" --jump "* ]]; then
-    local dir
-    dir=$(command aw "$@") && cd "$dir"
+    local output dir
+    output=$(command aw "$@")
+    echo "$output" | head -n -1
+    dir=$(echo "$output" | tail -1)
+    [ -d "$dir" ] && cd "$dir"
   else
     command aw "$@"
   fi
 }
 ```
 
-Then simply: `aw new --dir /tmp/my-feature -b feature/login --jump`
+Then: `aw new --dir /tmp/my-feature -b feature/login --jump`
 
 ### `aw status` — Show workspace status
 
