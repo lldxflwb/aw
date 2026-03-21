@@ -4,3 +4,4 @@ aw
 # OS files
 .DS_Store
 
+dist/
