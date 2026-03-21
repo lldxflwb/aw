@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -231,12 +232,25 @@ func CmdNew(args []string) {
 		}
 	}
 
-	// --jump: print path to stdout for shell eval
-	if jump && !jsonOut {
-		fmt.Println(targetDir)
+	if len(failed) > 0 && !jump {
+		os.Exit(1)
 	}
 
-	if len(failed) > 0 {
-		os.Exit(1)
+	// --jump: release lock and spawn a new shell in the workspace
+	if jump && !jsonOut {
+		lock.Release()
+		shell := os.Getenv("SHELL")
+		if shell == "" {
+			shell = "/bin/sh"
+		}
+		fmt.Printf("\nEntering workspace. Type 'exit' to return.\n")
+		cmd := exec.Command(shell)
+		cmd.Dir = targetDir
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			os.Exit(1)
+		}
 	}
 }
