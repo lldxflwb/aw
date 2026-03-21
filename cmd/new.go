@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -23,10 +22,10 @@ type newResult struct {
 	ContextLinks int               `json:"context_links"`
 }
 
-// CmdNew implements "aw new --dir <target> -b <branch> [--json] [--jump]".
+// CmdNew implements "aw new --dir <target> -b <branch> [--json] [-u]".
 func CmdNew(args []string) {
 	var dir, branch string
-	var jsonOut, jump, update bool
+	var jsonOut, update bool
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -38,23 +37,18 @@ func CmdNew(args []string) {
 			}
 		case arg == "--json":
 			jsonOut = true
-		case arg == "--jump":
-			jump = true
 		case arg == "--update":
 			update = true
 		default:
-			// short flags: -b requires a value, -j/-u are booleans
+			// short flags: -b requires a value, -u is boolean
 			if len(arg) > 1 && arg[0] == '-' && arg[1] != '-' {
 				for ci, c := range arg[1:] {
 					switch c {
 					case 'b':
-						// -b must be the last char, next arg is the value
 						if ci == len(arg[1:])-1 && i+1 < len(args) {
 							i++
 							branch = args[i]
 						}
-					case 'j':
-						jump = true
 					case 'u':
 						update = true
 					}
@@ -232,25 +226,7 @@ func CmdNew(args []string) {
 		}
 	}
 
-	if len(failed) > 0 && !jump {
+	if len(failed) > 0 {
 		os.Exit(1)
-	}
-
-	// --jump: release lock and spawn a new shell in the workspace
-	if jump && !jsonOut {
-		lock.Release()
-		shell := os.Getenv("SHELL")
-		if shell == "" {
-			shell = "/bin/sh"
-		}
-		fmt.Printf("\nEntering workspace. Type 'exit' to return.\n")
-		cmd := exec.Command(shell)
-		cmd.Dir = targetDir
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			os.Exit(1)
-		}
 	}
 }

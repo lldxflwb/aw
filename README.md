@@ -38,14 +38,6 @@ This will:
 4. Symlink repo-level untracked AI context files
 5. Write state to `.aw/workspace.json`
 
-Use `-j` (or `--jump`) to enter the workspace after creation:
-
-```bash
-aw new --dir /tmp/my-feature -b feature/login -j
-```
-
-This spawns a new shell in the workspace directory. Type `exit` to return to the original location.
-
 ### `aw status` — Show workspace status
 
 ```bash
