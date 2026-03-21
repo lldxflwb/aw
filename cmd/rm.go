@@ -24,20 +24,33 @@ func CmdRm(args []string) {
 	var deleteBranch, force, dryRun, jsonOut bool
 
 	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--dir":
+		arg := args[i]
+		switch {
+		case arg == "--dir":
 			if i+1 < len(args) {
 				i++
 				dir = args[i]
 			}
-		case "--branch":
+		case arg == "--branch" || arg == "-b":
 			deleteBranch = true
-		case "--force":
+		case arg == "--force" || arg == "-f":
 			force = true
-		case "--dry-run":
+		case arg == "--dry-run":
 			dryRun = true
-		case "--json":
+		case arg == "--json":
 			jsonOut = true
+		default:
+			// support combined short flags: -fb, -bf, etc.
+			if len(arg) > 1 && arg[0] == '-' && arg[1] != '-' {
+				for _, c := range arg[1:] {
+					switch c {
+					case 'f':
+						force = true
+					case 'b':
+						deleteBranch = true
+					}
+				}
+			}
 		}
 	}
 
