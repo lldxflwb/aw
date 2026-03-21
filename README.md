@@ -4,7 +4,9 @@ Lightweight CLI that creates isolated workspaces across multiple repositories us
 
 ## Why
 
-In polyrepo setups, AI agents can only see one repo at a time. `aw` creates a parallel workspace where all repos share the same feature branch, and AI context files (CLAUDE.md, .cursor/, etc.) are automatically symlinked so agents get full cross-repo context.
+In polyrepo setups, creating a feature branch means running `git worktree add` in every repo, one by one. `aw` does it in one command — scan all repos, create worktrees on the same branch, and symlink AI context files (CLAUDE.md, .cursor/, etc.) automatically.
+
+![aw new workflow](docs/workflow.svg)
 
 ## Install
 
