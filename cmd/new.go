@@ -28,23 +28,37 @@ func CmdNew(args []string) {
 	var jsonOut, jump, update bool
 
 	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--dir":
+		arg := args[i]
+		switch {
+		case arg == "--dir":
 			if i+1 < len(args) {
 				i++
 				dir = args[i]
 			}
-		case "-b":
-			if i+1 < len(args) {
-				i++
-				branch = args[i]
-			}
-		case "--json":
+		case arg == "--json":
 			jsonOut = true
-		case "--jump", "-j":
+		case arg == "--jump":
 			jump = true
-		case "--update", "-u":
+		case arg == "--update":
 			update = true
+		default:
+			// short flags: -b requires a value, -j/-u are booleans
+			if len(arg) > 1 && arg[0] == '-' && arg[1] != '-' {
+				for ci, c := range arg[1:] {
+					switch c {
+					case 'b':
+						// -b must be the last char, next arg is the value
+						if ci == len(arg[1:])-1 && i+1 < len(args) {
+							i++
+							branch = args[i]
+						}
+					case 'j':
+						jump = true
+					case 'u':
+						update = true
+					}
+				}
+			}
 		}
 	}
 
