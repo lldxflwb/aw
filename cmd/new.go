@@ -41,7 +41,7 @@ func CmdNew(args []string) {
 			}
 		case "--json":
 			jsonOut = true
-		case "--jump":
+		case "--jump", "-j":
 			jump = true
 		}
 	}
