@@ -22,10 +22,10 @@ type newResult struct {
 	ContextLinks int               `json:"context_links"`
 }
 
-// CmdNew implements "aw new --dir <target> -b <branch> [--json]".
+// CmdNew implements "aw new --dir <target> -b <branch> [--json] [--jump]".
 func CmdNew(args []string) {
 	var dir, branch string
-	var jsonOut bool
+	var jsonOut, jump bool
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -41,7 +41,15 @@ func CmdNew(args []string) {
 			}
 		case "--json":
 			jsonOut = true
+		case "--jump":
+			jump = true
 		}
+	}
+
+	// --jump: human output goes to stderr, stdout reserved for path
+	out := os.Stdout
+	if jump && !jsonOut {
+		out = os.Stderr
 	}
 
 	if dir == "" || branch == "" {
@@ -72,9 +80,9 @@ func CmdNew(args []string) {
 	}
 
 	if !jsonOut {
-		fmt.Printf("Found %d repos: %s\n", len(repos), strings.Join(repos, ", "))
-		fmt.Printf("Target: %s\n", targetDir)
-		fmt.Printf("Branch: %s\n\n", branch)
+		fmt.Fprintf(out, "Found %d repos: %s\n", len(repos), strings.Join(repos, ", "))
+		fmt.Fprintf(out, "Target: %s\n", targetDir)
+		fmt.Fprintf(out, "Branch: %s\n\n", branch)
 	}
 
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
@@ -97,13 +105,11 @@ func CmdNew(args []string) {
 		worktreePath := filepath.Join(targetDir, repo)
 
 		if !jsonOut {
-			fmt.Printf("[%s] creating worktree → %s (branch: %s)\n", repo, worktreePath, branch)
+			fmt.Fprintf(out, "[%s] creating worktree → %s (branch: %s)\n", repo, worktreePath, branch)
 		}
 
 		if err := git.WorktreeAdd(repoPath, worktreePath, branch); err != nil {
-			if !jsonOut {
-				fmt.Fprintf(os.Stderr, "[%s] FAILED: %v\n", repo, err)
-			}
+			fmt.Fprintf(os.Stderr, "[%s] FAILED: %v\n", repo, err)
 			failed = append(failed, repo)
 			continue
 		}
@@ -115,24 +121,24 @@ func CmdNew(args []string) {
 		})
 
 		if !jsonOut {
-			fmt.Printf("[%s] OK\n\n", repo)
+			fmt.Fprintf(out, "[%s] OK\n\n", repo)
 		}
 	}
 
 	// Workspace-level symlinks
 	if !jsonOut {
-		fmt.Println("== workspace context ==")
+		fmt.Fprintln(out, "== workspace context ==")
 	}
 	wsLinks := workspace.LinkWorkspaceContext(cwd, targetDir)
 	if !jsonOut {
 		for _, link := range wsLinks {
-			fmt.Printf("  [link] %s\n", filepath.Base(link.Dst))
+			fmt.Fprintf(out, "  [link] %s\n", filepath.Base(link.Dst))
 		}
 	}
 
 	// Repo-level symlinks
 	if !jsonOut {
-		fmt.Println("== repo context ==")
+		fmt.Fprintln(out, "== repo context ==")
 	}
 	var allLinks []state.ContextLink
 	allLinks = append(allLinks, wsLinks...)
@@ -142,7 +148,7 @@ func CmdNew(args []string) {
 		allLinks = append(allLinks, repoLinks...)
 		if !jsonOut {
 			for _, link := range repoLinks {
-				fmt.Printf("  [link] %s/%s (untracked)\n", entry.Name, filepath.Base(link.Dst))
+				fmt.Fprintf(out, "  [link] %s/%s (untracked)\n", entry.Name, filepath.Base(link.Dst))
 			}
 		}
 	}
@@ -175,12 +181,17 @@ func CmdNew(args []string) {
 			ContextLinks: len(allLinks),
 		}, warnings)
 	} else {
-		fmt.Println("---")
-		fmt.Printf("Done. %d/%d repos, %d context links.\n",
+		fmt.Fprintln(out, "---")
+		fmt.Fprintf(out, "Done. %d/%d repos, %d context links.\n",
 			len(repoEntries), len(repos), len(allLinks))
 		if len(failed) > 0 {
-			fmt.Printf("Failed: %s\n", strings.Join(failed, ", "))
+			fmt.Fprintf(out, "Failed: %s\n", strings.Join(failed, ", "))
 		}
+	}
+
+	// --jump: print path to stdout for shell eval
+	if jump && !jsonOut {
+		fmt.Println(targetDir)
 	}
 
 	if len(failed) > 0 {
