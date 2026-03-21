@@ -29,11 +29,12 @@ type RepoEntry struct {
 	WorktreePath string `json:"worktree_path"`
 }
 
-// ContextLink represents a symlinked context file.
+// ContextLink represents a linked (symlink or copy) context file.
 type ContextLink struct {
-	Src  string `json:"src"`
-	Dst  string `json:"dst"`
-	Type string `json:"type"` // "workspace" or "repo"
+	Src    string `json:"src"`
+	Dst    string `json:"dst"`
+	Type   string `json:"type"`   // "workspace" or "repo"
+	Method string `json:"method"` // "symlink" or "copy"
 }
 
 // StatePath returns the path to workspace.json for a given workspace root.

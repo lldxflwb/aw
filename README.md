@@ -68,6 +68,16 @@ This will:
 
 Options: `--dry-run` to preview without executing.
 
+### `aw relink` — Fix copy-based context links
+
+On Windows without Developer Mode, symlinks fail and `aw new` falls back to copying files. After enabling Developer Mode (Settings → System → For developers), run:
+
+```bash
+aw relink
+```
+
+This converts all copy-based context links back to proper symlinks and updates `.aw/workspace.json`.
+
 ## Flags (all commands)
 
 | Flag | Description |

@@ -110,7 +110,7 @@ func CmdRm(args []string) {
 	var worktreesRemoved, branchesDeleted int
 
 	// 1. Remove symlinks
-	linksRemoved := workspace.RemoveSymlinks(ws.ContextLinks)
+	linksRemoved := workspace.RemoveContextLinks(ws.ContextLinks)
 	if !jsonOut {
 		fmt.Printf("Removed %d symlinks\n", linksRemoved)
 	}

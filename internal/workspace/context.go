@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -21,7 +22,8 @@ var ContextCandidates = []string{
 	"aw.yml",
 }
 
-// LinkWorkspaceContext symlinks workspace-level AI context files from srcDir to dstDir.
+// LinkWorkspaceContext links workspace-level AI context files from srcDir to dstDir.
+// Tries symlink first; falls back to copy on failure (e.g. Windows without dev mode).
 func LinkWorkspaceContext(srcDir, dstDir string) []state.ContextLink {
 	var links []state.ContextLink
 	for _, name := range ContextCandidates {
@@ -33,16 +35,17 @@ func LinkWorkspaceContext(srcDir, dstDir string) []state.ContextLink {
 		if _, err := os.Lstat(dst); err == nil {
 			continue
 		}
-		if err := os.Symlink(src, dst); err != nil {
-			fmt.Fprintf(os.Stderr, "  [skip] %s: %v\n", name, err)
+		method, err := linkOrCopy(src, dst)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  [error] %s: %v\n", name, err)
 			continue
 		}
-		links = append(links, state.ContextLink{Src: src, Dst: dst, Type: "workspace"})
+		links = append(links, state.ContextLink{Src: src, Dst: dst, Type: "workspace", Method: method})
 	}
 	return links
 }
 
-// LinkRepoContext symlinks untracked AI context files from a source repo to its worktree.
+// LinkRepoContext links untracked AI context files from a source repo to its worktree.
 func LinkRepoContext(srcRepo, dstRepo, repoName string) []state.ContextLink {
 	var links []state.ContextLink
 	for _, name := range ContextCandidates {
@@ -51,17 +54,18 @@ func LinkRepoContext(srcRepo, dstRepo, repoName string) []state.ContextLink {
 			continue
 		}
 		if IsTracked(srcRepo, name) {
-			continue // worktree already has it
+			continue
 		}
 		dst := filepath.Join(dstRepo, name)
 		if _, err := os.Lstat(dst); err == nil {
 			continue
 		}
-		if err := os.Symlink(src, dst); err != nil {
-			fmt.Fprintf(os.Stderr, "  [skip] %s/%s: %v\n", repoName, name, err)
+		method, err := linkOrCopy(src, dst)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  [error] %s/%s: %v\n", repoName, name, err)
 			continue
 		}
-		links = append(links, state.ContextLink{Src: src, Dst: dst, Type: "repo"})
+		links = append(links, state.ContextLink{Src: src, Dst: dst, Type: "repo", Method: method})
 	}
 	return links
 }
@@ -72,20 +76,79 @@ func IsTracked(repoDir, path string) bool {
 	return err == nil
 }
 
-// RemoveSymlinks removes symlinks that are still symlinks (not replaced by real files).
-func RemoveSymlinks(links []state.ContextLink) int {
+// RemoveContextLinks removes context links (symlinks or copied files/dirs).
+func RemoveContextLinks(links []state.ContextLink) int {
 	removed := 0
 	for _, link := range links {
-		fi, err := os.Lstat(link.Dst)
-		if err != nil {
+		if _, err := os.Lstat(link.Dst); err != nil {
 			continue // already gone
 		}
-		if fi.Mode()&os.ModeSymlink == 0 {
-			continue // not a symlink anymore
-		}
-		if err := os.Remove(link.Dst); err == nil {
+		if err := os.RemoveAll(link.Dst); err == nil {
 			removed++
 		}
 	}
 	return removed
+}
+
+// linkOrCopy tries os.Symlink first. If that fails, falls back to copying
+// and prints a warning. Returns the method used ("symlink" or "copy").
+func linkOrCopy(src, dst string) (string, error) {
+	if err := os.Symlink(src, dst); err == nil {
+		return "symlink", nil
+	} else {
+		fmt.Fprintf(os.Stderr, "  [warn] symlink failed for %s: %v, falling back to copy\n", filepath.Base(src), err)
+	}
+
+	fi, err := os.Stat(src)
+	if err != nil {
+		return "", fmt.Errorf("cannot stat %s: %w", src, err)
+	}
+
+	if fi.IsDir() {
+		err = CopyDir(src, dst)
+	} else {
+		err = CopyFile(src, dst)
+	}
+	if err != nil {
+		return "", fmt.Errorf("copy failed for %s: %w", filepath.Base(src), err)
+	}
+	return "copy", nil
+}
+
+// CopyFile copies a single file from src to dst.
+func CopyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, in)
+	return err
+}
+
+// CopyDir recursively copies a directory from src to dst.
+func CopyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+
+		if info.IsDir() {
+			return os.MkdirAll(target, info.Mode())
+		}
+		return CopyFile(path, target)
+	})
 }

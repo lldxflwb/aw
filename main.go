@@ -20,6 +20,8 @@ func main() {
 		cmd.CmdRm(os.Args[2:])
 	case "status":
 		cmd.CmdStatus(os.Args[2:])
+	case "relink":
+		cmd.CmdRelink(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		printUsage()
@@ -34,6 +36,7 @@ Commands:
   new      Create a new workspace with worktrees
   rm       Remove a workspace and its worktrees
   status   Show status of workspace repos
+  relink   Convert copy-based context links back to symlinks
 
 Run 'aw <command> --help' for command-specific help.`)
 }
