@@ -90,6 +90,8 @@ func RemoveContextLinks(links []state.ContextLink) int {
 	return removed
 }
 
+var symlinkHintShown bool
+
 // linkOrCopy tries os.Symlink first. If that fails, falls back to copying
 // and prints a warning. Returns the method used ("symlink" or "copy").
 func linkOrCopy(src, dst string) (string, error) {
@@ -97,6 +99,10 @@ func linkOrCopy(src, dst string) (string, error) {
 		return "symlink", nil
 	} else {
 		fmt.Fprintf(os.Stderr, "  [warn] symlink failed for %s: %v, falling back to copy\n", filepath.Base(src), err)
+		if !symlinkHintShown {
+			fmt.Fprintf(os.Stderr, "  [hint] to fix: enable Developer Mode (Windows Settings → System → For developers), then run 'aw relink'\n")
+			symlinkHintShown = true
+		}
 	}
 
 	fi, err := os.Stat(src)
