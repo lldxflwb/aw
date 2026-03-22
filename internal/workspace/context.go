@@ -10,23 +10,11 @@ import (
 	"github.com/anthropics/aw/internal/state"
 )
 
-// ContextCandidates are AI context file/dir names to discover and link.
-var ContextCandidates = []string{
-	"CLAUDE.md",
-	"AGENTS.md",
-	"codex.md",
-	".claude",
-	".codex",
-	".cursorrules",
-	".cursor",
-	"aw.yml",
-}
-
 // LinkWorkspaceContext links workspace-level AI context files from srcDir to dstDir.
 // Tries symlink first; falls back to copy on failure (e.g. Windows without dev mode).
-func LinkWorkspaceContext(srcDir, dstDir string) []state.ContextLink {
+func LinkWorkspaceContext(srcDir, dstDir string, candidates []string) []state.ContextLink {
 	var links []state.ContextLink
-	for _, name := range ContextCandidates {
+	for _, name := range candidates {
 		src := filepath.Join(srcDir, name)
 		if _, err := os.Lstat(src); err != nil {
 			continue
@@ -45,15 +33,18 @@ func LinkWorkspaceContext(srcDir, dstDir string) []state.ContextLink {
 	return links
 }
 
-// LinkRepoContext links untracked AI context files from a source repo to its worktree.
-func LinkRepoContext(srcRepo, dstRepo, repoName string) []state.ContextLink {
+// LinkRepoContext links untracked, gitignored AI context files from a source repo to its worktree.
+// Files that are tracked by git or not gitignored are skipped with reasons.
+func LinkRepoContext(srcRepo, dstRepo, repoName string, candidates []string) ([]state.ContextLink, []SkipInfo) {
 	var links []state.ContextLink
-	for _, name := range ContextCandidates {
+	var skipped []SkipInfo
+	for _, name := range candidates {
 		src := filepath.Join(srcRepo, name)
 		if _, err := os.Lstat(src); err != nil {
 			continue
 		}
 		if IsTracked(srcRepo, name) {
+			skipped = append(skipped, SkipInfo{Name: name, Reason: "tracked by git, already in worktree"})
 			continue
 		}
 		dst := filepath.Join(dstRepo, name)
@@ -67,13 +58,19 @@ func LinkRepoContext(srcRepo, dstRepo, repoName string) []state.ContextLink {
 		}
 		links = append(links, state.ContextLink{Src: src, Dst: dst, Type: "repo", Method: method})
 	}
-	return links
+	return links, skipped
 }
 
 // IsTracked checks if a path is tracked by git in the given repo.
 func IsTracked(repoDir, path string) bool {
 	_, err := git.GitRun(repoDir, "ls-files", "--error-unmatch", path)
 	return err == nil
+}
+
+// SkipInfo describes why a context file was skipped during linking.
+type SkipInfo struct {
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
 }
 
 // RemoveContextLinks removes context links (symlinks or copied files/dirs).

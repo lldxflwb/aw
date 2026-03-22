@@ -162,11 +162,20 @@ func CmdNew(args []string) {
 		}
 	}
 
+	// Load config
+	cfg, created, err := workspace.LoadOrCreateConfig(cwd)
+	if err != nil {
+		exitErr(jsonOut, "CONFIG_ERROR", err, 1)
+	}
+	if created && !jsonOut {
+		fmt.Println("Created aw.yml with default context files")
+	}
+
 	// Workspace-level symlinks
 	if !jsonOut {
 		fmt.Println("== workspace context ==")
 	}
-	wsLinks := workspace.LinkWorkspaceContext(cwd, targetDir)
+	wsLinks := workspace.LinkWorkspaceContext(cwd, targetDir, cfg.Context)
 	if !jsonOut {
 		for _, link := range wsLinks {
 			fmt.Printf("  [link] %s\n", filepath.Base(link.Dst))
@@ -181,9 +190,12 @@ func CmdNew(args []string) {
 	allLinks = append(allLinks, wsLinks...)
 
 	for _, entry := range repoEntries {
-		repoLinks := workspace.LinkRepoContext(entry.SourcePath, entry.WorktreePath, entry.Name)
+		repoLinks, skipped := workspace.LinkRepoContext(entry.SourcePath, entry.WorktreePath, entry.Name, cfg.Context)
 		allLinks = append(allLinks, repoLinks...)
 		if !jsonOut {
+			for _, s := range skipped {
+				fmt.Printf("  [skip] %s/%s (%s)\n", entry.Name, s.Name, s.Reason)
+			}
 			for _, link := range repoLinks {
 				fmt.Printf("  [link] %s/%s (untracked)\n", entry.Name, filepath.Base(link.Dst))
 			}
