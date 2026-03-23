@@ -12,25 +12,32 @@ import (
 
 // Acquire attempts to acquire the workspace lock using exclusive file creation.
 func Acquire(workspaceDir string) (*Lock, error) {
-	dir := AWDir(workspaceDir)
+	return acquireExcl(AWDir(workspaceDir), lockFile)
+}
+
+// AcquireRegistry acquires the registry lock in the source directory.
+func AcquireRegistry(sourceDir string) (*Lock, error) {
+	return acquireExcl(AWDir(sourceDir), registryLockFile)
+}
+
+func acquireExcl(dir, name string) (*Lock, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
 
-	lockPath := filepath.Join(dir, lockFile)
+	lockPath := filepath.Join(dir, name)
 
-	// Check for stale lock
 	if _, err := os.Stat(lockPath); err == nil {
 		if isStale(lockPath) {
 			os.Remove(lockPath)
 		} else {
-			return nil, fmt.Errorf("LOCK_HELD: workspace locked by another process")
+			return nil, fmt.Errorf("LOCK_HELD: locked by another process")
 		}
 	}
 
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0644)
 	if err != nil {
-		return nil, fmt.Errorf("LOCK_HELD: workspace locked by another process")
+		return nil, fmt.Errorf("LOCK_HELD: locked by another process")
 	}
 
 	info := LockInfo{PID: os.Getpid(), CreatedAt: time.Now()}
@@ -40,7 +47,7 @@ func Acquire(workspaceDir string) (*Lock, error) {
 	return &Lock{file: f, path: lockPath}, nil
 }
 
-// Release releases the workspace lock.
+// Release releases the lock.
 func (l *Lock) Release() {
 	if l == nil || l.file == nil {
 		return

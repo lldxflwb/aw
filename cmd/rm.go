@@ -69,6 +69,17 @@ func CmdRm(args []string) {
 		os.Exit(2)
 	}
 
+	// Source mismatch check
+	if _, err := os.Stat(ws.Source); err != nil {
+		msg := fmt.Sprintf("source directory no longer exists at %s", ws.Source)
+		if jsonOut {
+			output.JSONError("SOURCE_MISMATCH", msg, 1)
+		}
+		fmt.Fprintf(os.Stderr, "error: %s\n", msg)
+		fmt.Fprintln(os.Stderr, "hint: cannot safely proceed when source is missing")
+		os.Exit(1)
+	}
+
 	// Pre-check dirty state
 	var dirtyRepos []string
 	for _, repo := range ws.Repos {
@@ -121,14 +132,9 @@ func CmdRm(args []string) {
 
 	var errors []string
 	var worktreesRemoved, branchesDeleted int
+	var failedRepos []state.RepoEntry
 
-	// 1. Remove symlinks
-	linksRemoved := workspace.RemoveContextLinks(ws.ContextLinks)
-	if !jsonOut {
-		fmt.Printf("Removed %d symlinks\n", linksRemoved)
-	}
-
-	// 2. Remove worktrees
+	// 1. Remove worktrees first (before context links)
 	for _, repo := range ws.Repos {
 		if !jsonOut {
 			fmt.Printf("[%s] removing worktree...\n", repo.Name)
@@ -136,6 +142,7 @@ func CmdRm(args []string) {
 		if err := git.WorktreeRemove(repo.SourcePath, repo.WorktreePath, force); err != nil {
 			errMsg := fmt.Sprintf("[%s] worktree remove: %v", repo.Name, err)
 			errors = append(errors, errMsg)
+			failedRepos = append(failedRepos, repo)
 			if !jsonOut {
 				fmt.Fprintf(os.Stderr, "  %s\n", errMsg)
 			}
@@ -143,7 +150,7 @@ func CmdRm(args []string) {
 		}
 		worktreesRemoved++
 
-		// 3. Delete branch if requested
+		// Delete branch if requested
 		if deleteBranch {
 			if err := git.BranchDelete(repo.SourcePath, ws.Branch, force); err != nil {
 				errMsg := fmt.Sprintf("[%s] branch delete: %v", repo.Name, err)
@@ -160,11 +167,37 @@ func CmdRm(args []string) {
 		}
 	}
 
-	// 4. Clean up .aw/ directory
-	os.RemoveAll(state.AWDir(wsDir))
+	var linksRemoved int
 
-	// 5. Try to remove workspace dir if empty
-	removeEmptyDir(wsDir)
+	if len(failedRepos) == 0 {
+		// All worktrees removed — safe to clean up everything
+		// 2. Remove context links
+		linksRemoved = workspace.RemoveContextLinks(ws.ContextLinks)
+		if !jsonOut {
+			fmt.Printf("Removed %d context links\n", linksRemoved)
+		}
+
+		// 3. Clean up .aw/ directory
+		lock.Release() // release before deleting the lock file's parent dir
+		os.RemoveAll(state.AWDir(wsDir))
+
+		// 4. Remove from registry
+		if err := state.RemoveWorkspace(ws.Source, wsDir); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to update registry: %v\n", err)
+		}
+
+		// 5. Try to remove workspace dir if empty
+		removeEmptyDir(wsDir)
+	} else {
+		// Partial failure — preserve workspace-level links, rewrite state with remaining repos
+		if !jsonOut {
+			fmt.Printf("Partial failure: keeping workspace-level context links and state\n")
+		}
+		ws.Repos = failedRepos
+		if err := state.Save(wsDir, ws); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to rewrite workspace.json: %v\n", err)
+		}
+	}
 
 	// Output
 	result := rmResult{

@@ -215,6 +215,13 @@ func CmdNew(args []string) {
 		fmt.Fprintf(os.Stderr, "warning: failed to write workspace.json: %v\n", err)
 	}
 
+	// Register in source directory's registry
+	if err := state.UpsertWorkspace(cwd, targetDir); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: REGISTRY_DESYNC: %v\n", err)
+		fmt.Fprintf(os.Stderr, "  to fix: add {\"dir\":\"%s\"} to %s\n",
+			state.CanonicalizePath(targetDir), state.RegistryPath(cwd))
+	}
+
 	// Output
 	if jsonOut {
 		var warnings []string

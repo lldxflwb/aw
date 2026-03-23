@@ -13,12 +13,21 @@ import (
 
 // Acquire attempts to acquire the workspace lock using flock.
 func Acquire(workspaceDir string) (*Lock, error) {
-	dir := AWDir(workspaceDir)
+	return acquireFlock(AWDir(workspaceDir), lockFile, true)
+}
+
+// AcquireRegistry acquires the registry lock in the source directory.
+// No stale recovery on Unix — flock is kernel-level and auto-releases on process exit.
+func AcquireRegistry(sourceDir string) (*Lock, error) {
+	return acquireFlock(AWDir(sourceDir), registryLockFile, false)
+}
+
+func acquireFlock(dir, name string, staleRecovery bool) (*Lock, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
 
-	lockPath := filepath.Join(dir, lockFile)
+	lockPath := filepath.Join(dir, name)
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open lock file: %w", err)
@@ -27,11 +36,11 @@ func Acquire(workspaceDir string) (*Lock, error) {
 	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 	if err != nil {
 		f.Close()
-		if isStale(lockPath) {
+		if staleRecovery && isStale(lockPath) {
 			os.Remove(lockPath)
-			return Acquire(workspaceDir)
+			return acquireFlock(dir, name, staleRecovery)
 		}
-		return nil, fmt.Errorf("LOCK_HELD: workspace locked by another process")
+		return nil, fmt.Errorf("LOCK_HELD: locked by another process")
 	}
 
 	info := LockInfo{PID: os.Getpid(), CreatedAt: time.Now()}
@@ -43,7 +52,7 @@ func Acquire(workspaceDir string) (*Lock, error) {
 	return &Lock{file: f, path: lockPath}, nil
 }
 
-// Release releases the workspace lock.
+// Release releases the lock.
 func (l *Lock) Release() {
 	if l == nil || l.file == nil {
 		return

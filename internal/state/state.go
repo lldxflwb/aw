@@ -60,7 +60,7 @@ func Load(workspaceDir string) (*WorkspaceState, error) {
 	return &ws, nil
 }
 
-// Save writes workspace.json to the given workspace root.
+// Save writes workspace.json to the given workspace root using atomic write.
 func Save(workspaceDir string, ws *WorkspaceState) error {
 	dir := AWDir(workspaceDir)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -70,5 +70,27 @@ func Save(workspaceDir string, ws *WorkspaceState) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(StatePath(workspaceDir), data, 0644)
+	return AtomicWrite(StatePath(workspaceDir), data)
+}
+
+// AtomicWrite writes data to path via temp file + fsync + rename.
+// Atomic on Unix; best-effort on Windows.
+func AtomicWrite(path string, data []byte) error {
+	tmp := path + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	f.Close()
+	return os.Rename(tmp, path)
 }

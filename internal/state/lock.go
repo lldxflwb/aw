@@ -7,8 +7,9 @@ import (
 )
 
 const (
-	lockFile    = "lock"
-	lockTimeout = 30 * time.Second
+	lockFile         = "lock"
+	registryLockFile = "registry.lock"
+	lockTimeout      = 30 * time.Second
 )
 
 // LockInfo contains metadata about who holds the lock.
