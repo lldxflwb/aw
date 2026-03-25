@@ -7,6 +7,7 @@ import (
 
 	"github.com/anthropics/aw/internal/git"
 	"github.com/anthropics/aw/internal/output"
+	"github.com/anthropics/aw/internal/session"
 	"github.com/anthropics/aw/internal/state"
 	"github.com/anthropics/aw/internal/workspace"
 )
@@ -21,7 +22,7 @@ type rmResult struct {
 // CmdRm implements "aw rm [--dir <path>] [--branch] [--force] [--dry-run] [--json]".
 func CmdRm(args []string) {
 	var dir string
-	var deleteBranch, force, dryRun, jsonOut bool
+	var deleteBranch, force, dryRun, jsonOut, saveSession bool
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -39,6 +40,8 @@ func CmdRm(args []string) {
 			dryRun = true
 		case arg == "--json":
 			jsonOut = true
+		case arg == "--save-session":
+			saveSession = true
 		default:
 			// support combined short flags: -fb, -bf, etc.
 			if len(arg) > 1 && arg[0] == '-' && arg[1] != '-' {
@@ -171,22 +174,42 @@ func CmdRm(args []string) {
 
 	if len(failedRepos) == 0 {
 		// All worktrees removed — safe to clean up everything
-		// 2. Remove context links
+
+		// 2. Save back sessions if requested
+		if saveSession {
+			moved, err := session.SaveBackSessions(ws.Source, wsDir)
+			if err != nil && !jsonOut {
+				fmt.Fprintf(os.Stderr, "warning: save-session: %v\n", err)
+			}
+			if moved > 0 && !jsonOut {
+				fmt.Printf("Saved %d session(s) back to source\n", moved)
+			}
+		}
+
+		// 3. Cleanup memory symlink
+		if ws.SharedMemory != nil {
+			memLink := &session.MemoryLink{Src: ws.SharedMemory.Src, Dst: ws.SharedMemory.Dst}
+			if session.CleanupMemoryLink(memLink) && !jsonOut {
+				fmt.Println("Removed memory symlink")
+			}
+		}
+
+		// 4. Remove context links
 		linksRemoved = workspace.RemoveContextLinks(ws.ContextLinks)
 		if !jsonOut {
 			fmt.Printf("Removed %d context links\n", linksRemoved)
 		}
 
-		// 3. Clean up .aw/ directory
+		// 5. Clean up .aw/ directory
 		lock.Release() // release before deleting the lock file's parent dir
 		os.RemoveAll(state.AWDir(wsDir))
 
-		// 4. Remove from registry
+		// 6. Remove from registry
 		if err := state.RemoveWorkspace(ws.Source, wsDir); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to update registry: %v\n", err)
 		}
 
-		// 5. Try to remove workspace dir if empty
+		// 7. Try to remove workspace dir if empty
 		removeEmptyDir(wsDir)
 	} else {
 		// Partial failure — preserve workspace-level links, rewrite state with remaining repos

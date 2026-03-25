@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/anthropics/aw/internal/git"
 	"github.com/anthropics/aw/internal/output"
+	"github.com/anthropics/aw/internal/session"
 	"github.com/anthropics/aw/internal/state"
 	"github.com/anthropics/aw/internal/workspace"
 )
@@ -22,10 +24,11 @@ type newResult struct {
 	ContextLinks int               `json:"context_links"`
 }
 
-// CmdNew implements "aw new --dir <target> -b <branch> [--json] [-u]".
+// CmdNew implements "aw new --dir <target> -b <branch> [--json] [-u] [-s] [--session-limit N] [--session-id UUID]".
 func CmdNew(args []string) {
-	var dir, branch string
-	var jsonOut, update bool
+	var dir, branch, sessionID, fromBranch string
+	var jsonOut, update, cloneSession bool
+	sessionLimit := 0
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -39,8 +42,36 @@ func CmdNew(args []string) {
 			jsonOut = true
 		case arg == "--update":
 			update = true
+		case arg == "--from":
+			if i+1 < len(args) {
+				i++
+				fromBranch = args[i]
+			} else {
+				fmt.Fprintln(os.Stderr, "error: --from requires a value")
+				os.Exit(2)
+			}
+		case arg == "--clone-session":
+			cloneSession = true
+		case arg == "--session-limit":
+			if i+1 < len(args) {
+				i++
+				n, err := strconv.Atoi(args[i])
+				if err != nil || n < 1 {
+					fmt.Fprintf(os.Stderr, "error: --session-limit must be a positive integer\n")
+					os.Exit(2)
+				}
+				sessionLimit = n
+			}
+		case arg == "--session-id":
+			if i+1 < len(args) {
+				i++
+				sessionID = args[i]
+			} else {
+				fmt.Fprintln(os.Stderr, "error: --session-id requires a value")
+				os.Exit(2)
+			}
 		default:
-			// short flags: -b requires a value, -u is boolean
+			// short flags: -b requires a value, -u/-s are boolean
 			if len(arg) > 1 && arg[0] == '-' && arg[1] != '-' {
 				for ci, c := range arg[1:] {
 					switch c {
@@ -49,12 +80,30 @@ func CmdNew(args []string) {
 							i++
 							branch = args[i]
 						}
+					case 'f':
+						if ci == len(arg[1:])-1 && i+1 < len(args) {
+							i++
+							fromBranch = args[i]
+						}
 					case 'u':
 						update = true
+					case 's':
+						cloneSession = true
 					}
 				}
 			}
 		}
+	}
+
+	// Resolve session clone parameters
+	doClone := cloneSession || sessionLimit > 0 || sessionID != ""
+	if sessionID != "" {
+		sessionLimit = 1 // --session-id implies exactly 1
+	} else if doClone && sessionLimit == 0 {
+		sessionLimit = 1 // --clone-session/-s defaults to 1
+	}
+	if sessionLimit > 10 {
+		sessionLimit = 10
 	}
 
 	if dir == "" || branch == "" {
@@ -135,17 +184,27 @@ func CmdNew(args []string) {
 		repoPath := filepath.Join(cwd, repo)
 		worktreePath := filepath.Join(targetDir, repo)
 
-		// Get current branch before creating worktree
-		fromBranch := "HEAD"
+		// Determine start point for this repo
+		startPoint := ""
+		displayFrom := "HEAD"
 		if b, err := git.GitRun(repoPath, "rev-parse", "--abbrev-ref", "HEAD"); err == nil {
-			fromBranch = b
+			displayFrom = b
+		}
+
+		if fromBranch != "" {
+			if git.RefExists(repoPath, fromBranch) {
+				startPoint = fromBranch
+				displayFrom = fromBranch
+			} else if !jsonOut {
+				fmt.Fprintf(os.Stderr, "[%s] warn: %s not found, using %s\n", repo, fromBranch, displayFrom)
+			}
 		}
 
 		if !jsonOut {
-			fmt.Printf("[%s] %s → %s\n", repo, fromBranch, branch)
+			fmt.Printf("[%s] %s → %s\n", repo, displayFrom, branch)
 		}
 
-		if err := git.WorktreeAdd(repoPath, worktreePath, branch); err != nil {
+		if err := git.WorktreeAdd(repoPath, worktreePath, branch, startPoint); err != nil {
 			fmt.Fprintf(os.Stderr, "[%s] FAILED: %v\n", repo, err)
 			failed = append(failed, repo)
 			continue
@@ -213,6 +272,65 @@ func CmdNew(args []string) {
 	}
 	if err := state.Save(targetDir, ws); err != nil && !jsonOut {
 		fmt.Fprintf(os.Stderr, "warning: failed to write workspace.json: %v\n", err)
+	}
+
+	// Clone sessions if requested
+	if doClone {
+		if !jsonOut {
+			fmt.Println("== session ==")
+		}
+		sessionFound := false
+		results, err := session.CloneSessions(cwd, targetDir, sessionID, sessionLimit)
+		if err != nil {
+			if !jsonOut {
+				fmt.Fprintf(os.Stderr, "  [warn] session clone: %v\n", err)
+			}
+		} else {
+			for _, r := range results {
+				short := r.ID
+				if len(short) > 8 {
+					short = short[:8]
+				}
+				if r.Status == "ok" {
+					ws.ClonedSessionIDs = append(ws.ClonedSessionIDs, r.ID)
+					sessionFound = true
+					if !jsonOut {
+						fmt.Printf("  [clone] %s\n", short)
+					}
+				} else if !jsonOut {
+					fmt.Printf("  [skip] %s (%s)\n", short, r.Status)
+				}
+			}
+
+			// Symlink memory directory
+			memLink, memStatus := session.LinkMemory(cwd, targetDir)
+			if memLink != nil {
+				ws.SharedMemory = &state.MemoryInfo{Src: memLink.Src, Dst: memLink.Dst}
+				if !jsonOut {
+					fmt.Printf("  [link] memory/\n")
+				}
+			} else if memStatus != "missing_source" && memStatus != "already_linked" && !jsonOut {
+				fmt.Fprintf(os.Stderr, "  [warn] memory: %s\n", memStatus)
+			}
+
+			// Re-save workspace.json with session info
+			if err := state.Save(targetDir, ws); err != nil {
+				// Rollback cloned files since state won't record them
+				session.RollbackClonedFiles(results)
+				if memLink != nil {
+					session.CleanupMemoryLink(&session.MemoryLink{Src: memLink.Src, Dst: memLink.Dst})
+				}
+				ws.ClonedSessionIDs = nil
+				ws.SharedMemory = nil
+				if !jsonOut {
+					fmt.Fprintf(os.Stderr, "  [warn] state save failed, rolled back session clone\n")
+				}
+			}
+		}
+
+		if !sessionFound && !jsonOut {
+			fmt.Println("  [skip] no session found")
+		}
 	}
 
 	// Register in source directory's registry

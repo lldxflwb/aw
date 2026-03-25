@@ -14,12 +14,20 @@ const (
 
 // WorkspaceState represents the .aw/workspace.json file.
 type WorkspaceState struct {
-	Version      int           `json:"version"`
-	Source       string        `json:"source"`
-	Branch       string        `json:"branch"`
-	CreatedAt    string        `json:"created_at"`
-	Repos        []RepoEntry   `json:"repos"`
-	ContextLinks []ContextLink `json:"context_links"`
+	Version          int           `json:"version"`
+	Source           string        `json:"source"`
+	Branch           string        `json:"branch"`
+	CreatedAt        string        `json:"created_at"`
+	Repos            []RepoEntry   `json:"repos"`
+	ContextLinks     []ContextLink `json:"context_links"`
+	ClonedSessionIDs []string      `json:"cloned_session_ids,omitempty"`
+	SharedMemory     *MemoryInfo   `json:"shared_memory,omitempty"`
+}
+
+// MemoryInfo records a shared memory symlink.
+type MemoryInfo struct {
+	Src string `json:"src"`
+	Dst string `json:"dst"`
 }
 
 // RepoEntry represents a single repo in the workspace.
