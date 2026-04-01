@@ -10,7 +10,8 @@ import (
 
 // Config represents the aw.yml configuration file.
 type Config struct {
-	Context []string `yaml:"context"`
+	Context  []string          `yaml:"context"`
+	Branches map[string]string `yaml:"branches,omitempty"`
 }
 
 // DefaultConfig returns the default configuration with hardcoded context candidates.

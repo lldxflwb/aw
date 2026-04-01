@@ -1,10 +1,6 @@
 # aw — git worktree for polyrepos
 
-Lightweight CLI that creates isolated workspaces across multiple repositories using git worktrees, with automatic AI context file linking.
-
-## Why
-
-In polyrepo setups, creating a feature branch means running `git worktree add` in every repo, one by one. `aw` does it in one command — scan all repos, create worktrees on the same branch, and symlink AI context files (CLAUDE.md, .cursor/, etc.) automatically.
+Lightweight CLI that creates isolated workspaces across multiple repositories using git worktrees, with automatic AI context file linking and Claude session management.
 
 ![aw new workflow](docs/workflow.svg)
 
@@ -14,34 +10,70 @@ In polyrepo setups, creating a feature branch means running `git worktree add` i
 go install github.com/lldxflwb/aw@latest
 ```
 
-Or build from source:
-
-```bash
-git clone https://github.com/lldxflwb/aw.git
-cd aw && go build -o aw .
-```
+Or download a binary from [Releases](https://github.com/lldxflwb/aw/releases).
 
 ## Usage
 
 ### `aw new` — Create a workspace
 
 ```bash
-# From a directory containing multiple git repos:
 cd ~/projects
-aw new --dir /tmp/my-feature -b feature/login
+
+# Basic: create workspace with new branch
+aw new -b feature/login --dir /tmp/feature-login
+
+# Auto directory: omit --dir, creates ../projects-feature-login
+aw new -b feature/login
+
+# Update + clone session + new branch
+aw new -usb feature/login
+
+# Based on an existing branch (not HEAD)
+aw new -b feature/v2 --from feature/v1
+
+# Short form with all options
+aw new -usb feature/login -f dev
 ```
 
 This will:
 1. Scan for all git repos in the current directory
-2. Create a git worktree for each repo with the given branch
-3. Symlink workspace-level AI context files (CLAUDE.md, .claude/, etc.)
-4. Symlink repo-level untracked AI context files
-5. Write state to `.aw/workspace.json`
+2. Fetch and create a git worktree for each repo with the given branch
+3. Symlink AI context files (CLAUDE.md, .claude/, etc.)
+4. Optionally clone Claude session and symlink project memory
+5. Register workspace in `.aw/registry.json`
+
+#### Flags
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--dir <path>` | | Target workspace directory (default: `../<cwd>-<branch>`) |
+| `-b <branch>` | | New branch name (required) |
+| `--from <branch>` | `-f` | Base branch to create from (default: HEAD) |
+| `--update` | `-u` | Fetch remotes before creating worktrees |
+| `--clone-session` | `-s` | Clone latest Claude session to new workspace |
+| `--session-limit N` | | Clone N most recent sessions (max 10) |
+| `--session-id <uuid>` | | Clone a specific session |
+| `--json` | | JSON output |
+
+Short flags can be combined: `-usb feature/login` = update + clone session + branch.
+
+### `aw list` — List all workspaces
+
+```bash
+aw list
+```
+
+```
+DIR                         BRANCH         REPOS  CREATED   STATUS
+--------------------------  -------------  -----  --------  ------
+/tmp/feature-login          feature/login  7      2h ago    ok
+/tmp/fix-bug                fix/bug-123    7      1d ago    ok
+```
 
 ### `aw status` — Show workspace status
 
 ```bash
-cd /tmp/my-feature
+cd /tmp/feature-login
 aw status
 ```
 
@@ -52,42 +84,76 @@ backend   feature/login  2M      1      0       a1b2c3d Add auth endpoint
 frontend  feature/login  clean   0      0       e4f5g6h Update login page
 ```
 
-Options: `--short` for tab-separated output, `--json` for machine-readable output.
+Options: `--short` for tab-separated, `--json` for machine-readable.
 
 ### `aw rm` — Remove a workspace
 
 ```bash
-cd /tmp/my-feature
-aw rm --force --branch
+# Basic remove (checks for dirty repos)
+aw rm
+
+# Force remove + delete branches
+aw rm -fb
+
+# Save sessions back to source before removing
+aw rm -fb --save-session
 ```
 
-This will:
-1. Check for dirty repos (fails without `--force`)
-2. Remove symlinks
-3. Remove git worktrees
-4. Optionally delete branches (`--branch`, uses `-D` with `--force`)
-5. Clean up `.aw/` directory
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--force` | `-f` | Force remove even with dirty repos |
+| `--branch` | `-b` | Delete branches after removing worktrees |
+| `--save-session` | | Move workspace sessions back to source project |
+| `--dry-run` | | Preview without executing |
+| `--dir <path>` | | Explicit workspace directory |
 
-Options: `--dry-run` to preview without executing.
+With `--force`, the workspace directory is fully removed. Without it, remaining files are listed with a hint.
 
-### `aw relink` — Fix copy-based context links
-
-On Windows without Developer Mode, symlinks fail and `aw new` falls back to copying files. After enabling Developer Mode (Settings → System → For developers), run:
+### `aw prune` — Clean up stale registry entries
 
 ```bash
-aw relink
+aw prune          # Remove entries for deleted directories
+aw prune --force  # Also remove invalid/mismatched entries
 ```
 
-This converts all copy-based context links back to proper symlinks and updates `.aw/workspace.json`.
+### `aw relink` — Fix Windows context links
 
-## Flags (all commands)
+Converts copy-based context links back to symlinks after enabling Developer Mode.
 
-| Flag | Description |
-|------|-------------|
-| `--json` | JSON-only stdout, logs to stderr |
-| `--dir <path>` | Explicit workspace directory |
+## Configuration (`aw.yml`)
 
-## JSON protocol
+Auto-created on first run in the source directory:
+
+```yaml
+# AI context files to symlink into workspaces
+context:
+  - CLAUDE.md
+  - AGENTS.md
+  - codex.md
+  - .claude
+  - .codex
+  - .cursorrules
+  - .cursor
+
+# Per-repo checkout branch (overrides --from)
+branches:
+  backend: dev
+  frontend: main
+  proto: main
+```
+
+The `branches` map lets you configure different base branches per repo, so you don't need `--from` every time.
+
+## Session Clone
+
+When creating a workspace with `-s`, aw:
+- Copies the most recent Claude session (with a new UUID) to the new workspace's project directory
+- Symlinks the project memory directory for shared context
+- Records cloned session IDs in `workspace.json`
+
+On `aw rm --save-session`, new sessions created in the workspace are moved back to the source project directory.
+
+## JSON Protocol
 
 All `--json` output follows this envelope:
 
@@ -102,16 +168,6 @@ All `--json` output follows this envelope:
 ```
 
 Exit codes: `0` success, `1` partial failure, `2` usage error.
-
-## AI context files
-
-`aw` automatically discovers and symlinks these files/directories:
-
-- `CLAUDE.md`, `AGENTS.md`, `codex.md`
-- `.claude/`, `.codex/`, `.cursor/`, `.cursorrules`
-- `aw.yml`
-
-Workspace-level files are linked to the workspace root. Repo-level files are linked only if they are **untracked** by git (tracked files already exist in the worktree).
 
 ## License
 

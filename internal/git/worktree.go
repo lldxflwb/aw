@@ -24,7 +24,7 @@ func WorktreeAdd(repoDir, worktreePath, branch, startPoint string) error {
 
 // RefExists checks if a git ref (branch, tag, commit) exists in the repo.
 func RefExists(repoDir, ref string) bool {
-	_, err := GitRun(repoDir, "rev-parse", "--verify", "--quiet", "--", ref)
+	_, err := GitRun(repoDir, "rev-parse", "--verify", "--quiet", ref)
 	return err == nil
 }
 

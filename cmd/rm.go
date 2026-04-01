@@ -209,8 +209,23 @@ func CmdRm(args []string) {
 			fmt.Fprintf(os.Stderr, "warning: failed to update registry: %v\n", err)
 		}
 
-		// 7. Try to remove workspace dir if empty
-		removeEmptyDir(wsDir)
+		// 7. Remove workspace dir
+		if force {
+			// --force: remove entire workspace dir regardless of remaining files
+			os.RemoveAll(wsDir)
+		} else {
+			// Try to remove if empty, otherwise list remaining files
+			removeEmptyDir(wsDir)
+			if entries, err := os.ReadDir(wsDir); err == nil && len(entries) > 0 {
+				if !jsonOut {
+					fmt.Fprintf(os.Stderr, "note: workspace dir has remaining files:\n")
+					for _, e := range entries {
+						fmt.Fprintf(os.Stderr, "  %s\n", e.Name())
+					}
+					fmt.Fprintf(os.Stderr, "  use --force to remove, or: rm -rf %s\n", wsDir)
+				}
+			}
+		}
 	} else {
 		// Partial failure — preserve workspace-level links, rewrite state with remaining repos
 		if !jsonOut {

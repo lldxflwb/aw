@@ -106,13 +106,23 @@ func CmdNew(args []string) {
 		sessionLimit = 10
 	}
 
-	if dir == "" || branch == "" {
+	if branch == "" {
 		if jsonOut {
-			output.JSONError("USAGE_ERROR", "--dir and -b are required", 2)
+			output.JSONError("USAGE_ERROR", "-b is required", 2)
 		}
-		fmt.Fprintln(os.Stderr, "error: --dir and -b are required")
-		fmt.Fprintln(os.Stderr, "Usage: aw new --dir <target> -b <branch>")
+		fmt.Fprintln(os.Stderr, "error: -b is required")
+		fmt.Fprintln(os.Stderr, "Usage: aw new -b <branch> [--dir <target>]")
 		os.Exit(2)
+	}
+
+	// If --dir not specified, use ../<cwd-basename>-<branch>
+	if dir == "" {
+		cwd, err := os.Getwd()
+		if err == nil {
+			base := filepath.Base(cwd)
+			safeBranch := strings.ReplaceAll(branch, "/", "-")
+			dir = filepath.Join(filepath.Dir(cwd), base+"-"+safeBranch)
+		}
 	}
 
 	targetDir, err := filepath.Abs(dir)
@@ -150,6 +160,15 @@ func CmdNew(args []string) {
 	}
 	defer lock.Release()
 
+	// Load config (needed for per-repo branches and update targets)
+	cfg, created, err := workspace.LoadOrCreateConfig(cwd)
+	if err != nil {
+		exitErr(jsonOut, "CONFIG_ERROR", err, 1)
+	}
+	if created && !jsonOut {
+		fmt.Println("Created aw.yml with default context files")
+	}
+
 	// Update repos before branching
 	if update {
 		if !jsonOut {
@@ -157,18 +176,18 @@ func CmdNew(args []string) {
 		}
 		for _, repo := range repos {
 			repoPath := filepath.Join(cwd, repo)
+
 			if !jsonOut {
-				fmt.Printf("[%s] pulling...", repo)
+				fmt.Printf("[%s] ", repo)
 			}
-			_, err := git.GitRun(repoPath, "pull", "--ff-only")
-			if err != nil {
+			// Fetch to update remote refs
+			_, fetchErr := git.GitRun(repoPath, "fetch")
+			if fetchErr != nil {
 				if !jsonOut {
-					fmt.Printf(" skipped (not fast-forwardable)\n")
+					fmt.Printf("fetch failed\n")
 				}
-			} else {
-				if !jsonOut {
-					fmt.Printf(" ok\n")
-				}
+			} else if !jsonOut {
+				fmt.Printf("fetched\n")
 			}
 		}
 		if !jsonOut {
@@ -191,12 +210,23 @@ func CmdNew(args []string) {
 			displayFrom = b
 		}
 
-		if fromBranch != "" {
-			if git.RefExists(repoPath, fromBranch) {
-				startPoint = fromBranch
-				displayFrom = fromBranch
+		// Per-repo branch from aw.yml overrides --from
+		repoBranch := fromBranch
+		if b, ok := cfg.Branches[repo]; ok {
+			repoBranch = b
+		}
+
+		if repoBranch != "" {
+			// Prefer origin/<branch> (remote latest) over local branch
+			remoteRef := "origin/" + repoBranch
+			if update && git.RefExists(repoPath, remoteRef) {
+				startPoint = remoteRef
+				displayFrom = repoBranch + " (remote)"
+			} else if git.RefExists(repoPath, repoBranch) {
+				startPoint = repoBranch
+				displayFrom = repoBranch
 			} else if !jsonOut {
-				fmt.Fprintf(os.Stderr, "[%s] warn: %s not found, using %s\n", repo, fromBranch, displayFrom)
+				fmt.Fprintf(os.Stderr, "[%s] warn: %s not found, using %s\n", repo, repoBranch, displayFrom)
 			}
 		}
 
@@ -219,15 +249,6 @@ func CmdNew(args []string) {
 		if !jsonOut {
 			fmt.Printf("[%s] OK\n\n", repo)
 		}
-	}
-
-	// Load config
-	cfg, created, err := workspace.LoadOrCreateConfig(cwd)
-	if err != nil {
-		exitErr(jsonOut, "CONFIG_ERROR", err, 1)
-	}
-	if created && !jsonOut {
-		fmt.Println("Created aw.yml with default context files")
 	}
 
 	// Workspace-level symlinks

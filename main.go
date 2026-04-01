@@ -44,5 +44,9 @@ Commands:
   prune    Remove stale entries from workspace registry
   relink   Convert copy-based context links back to symlinks
 
-Run 'aw <command> --help' for command-specific help.`)
+Examples:
+  aw new -usb feature/login          # update, clone session, create branch
+  aw new -usb fix -f dev             # based on dev branch
+  aw rm -fb                          # force remove + delete branches
+  aw list                            # show all workspaces`)
 }
