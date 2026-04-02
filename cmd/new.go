@@ -143,12 +143,6 @@ func CmdNew(args []string) {
 		exitErr(jsonOut, "NO_REPOS", fmt.Errorf("no git repos found in current directory"), 1)
 	}
 
-	if !jsonOut {
-		fmt.Printf("Found %d repos: %s\n", len(repos), strings.Join(repos, ", "))
-		fmt.Printf("Target: %s\n", targetDir)
-		fmt.Printf("Branch: %s\n\n", branch)
-	}
-
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		exitErr(jsonOut, "DIR_ERROR", err, 1)
 	}
@@ -160,13 +154,55 @@ func CmdNew(args []string) {
 	}
 	defer lock.Release()
 
-	// Load config (needed for per-repo branches and update targets)
+	// Load config (needed for exclude, per-repo branches, and context candidates)
 	cfg, created, err := workspace.LoadOrCreateConfig(cwd)
 	if err != nil {
 		exitErr(jsonOut, "CONFIG_ERROR", err, 1)
 	}
 	if created && !jsonOut {
 		fmt.Println("Created aw.yml with default context files")
+	}
+
+	// Filter out excluded repos (symlink them instead of creating worktrees)
+	var excludedRepos []string
+	if len(cfg.Exclude) > 0 {
+		excludeSet := make(map[string]bool)
+		for _, e := range cfg.Exclude {
+			excludeSet[e] = true
+		}
+		var filtered []string
+		for _, repo := range repos {
+			if excludeSet[repo] {
+				excludedRepos = append(excludedRepos, repo)
+			} else {
+				filtered = append(filtered, repo)
+			}
+		}
+		repos = filtered
+	}
+
+	// Symlink excluded repos into workspace
+	if len(excludedRepos) > 0 {
+		for _, repo := range excludedRepos {
+			src := filepath.Join(cwd, repo)
+			dst := filepath.Join(targetDir, repo)
+			if _, err := os.Lstat(dst); err == nil {
+				continue // already exists
+			}
+			if err := os.Symlink(src, dst); err != nil {
+				if !jsonOut {
+					fmt.Fprintf(os.Stderr, "[%s] warn: symlink failed: %v\n", repo, err)
+				}
+			} else if !jsonOut {
+				fmt.Printf("[%s] linked (excluded)\n", repo)
+			}
+		}
+	}
+
+	if !jsonOut {
+		fmt.Printf("Found %d repos: %s\n", len(repos), strings.Join(repos, ", "))
+		fmt.Printf("Target: %s\n", targetDir)
+		fmt.Printf("Branch: %s\n\n", branch)
 	}
 
 	// Update repos before branching
@@ -284,12 +320,13 @@ func CmdNew(args []string) {
 
 	// Write workspace.json
 	ws := &state.WorkspaceState{
-		Version:      state.StateVersion,
-		Source:       cwd,
-		Branch:       branch,
-		CreatedAt:    time.Now().Format(time.RFC3339),
-		Repos:        repoEntries,
-		ContextLinks: allLinks,
+		Version:       state.StateVersion,
+		Source:        cwd,
+		Branch:        branch,
+		CreatedAt:     time.Now().Format(time.RFC3339),
+		Repos:         repoEntries,
+		ContextLinks:  allLinks,
+		ExcludedLinks: excludedRepos,
 	}
 	if err := state.Save(targetDir, ws); err != nil && !jsonOut {
 		fmt.Fprintf(os.Stderr, "warning: failed to write workspace.json: %v\n", err)

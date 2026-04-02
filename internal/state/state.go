@@ -20,6 +20,7 @@ type WorkspaceState struct {
 	CreatedAt        string        `json:"created_at"`
 	Repos            []RepoEntry   `json:"repos"`
 	ContextLinks     []ContextLink `json:"context_links"`
+	ExcludedLinks    []string      `json:"excluded_links,omitempty"`
 	ClonedSessionIDs []string      `json:"cloned_session_ids,omitempty"`
 	SharedMemory     *MemoryInfo   `json:"shared_memory,omitempty"`
 }

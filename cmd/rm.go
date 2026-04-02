@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/anthropics/aw/internal/git"
@@ -51,6 +52,8 @@ func CmdRm(args []string) {
 						force = true
 					case 'b':
 						deleteBranch = true
+					case 's':
+						saveSession = true
 					}
 				}
 			}
@@ -194,7 +197,15 @@ func CmdRm(args []string) {
 			}
 		}
 
-		// 4. Remove context links
+		// 4. Remove excluded repo symlinks
+		for _, repo := range ws.ExcludedLinks {
+			link := filepath.Join(wsDir, repo)
+			if fi, err := os.Lstat(link); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+				os.Remove(link)
+			}
+		}
+
+		// 5. Remove context links
 		linksRemoved = workspace.RemoveContextLinks(ws.ContextLinks)
 		if !jsonOut {
 			fmt.Printf("Removed %d context links\n", linksRemoved)

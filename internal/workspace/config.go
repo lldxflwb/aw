@@ -12,6 +12,7 @@ import (
 type Config struct {
 	Context  []string          `yaml:"context"`
 	Branches map[string]string `yaml:"branches,omitempty"`
+	Exclude  []string          `yaml:"exclude,omitempty"`
 }
 
 // DefaultConfig returns the default configuration with hardcoded context candidates.
